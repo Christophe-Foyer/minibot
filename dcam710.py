@@ -1,8 +1,8 @@
 """
-Pico Zense DCAM710 Camera Module
+Pico Zense DCAM710 Camera Module - Fixed Version
 
-A simple Python wrapper for the Pico Zense DCAM710 depth camera.
-Provides easy access to RGB and depth images.
+A corrected Python wrapper for the Pico Zense DCAM710 depth camera.
+Based on the actual Vzense API structure.
 
 Requirements:
 - Vzense BaseSDK installed
@@ -34,12 +34,16 @@ Usage:
 import numpy as np
 import time
 import logging
+import os
+from pathlib import Path
+import sys
 from typing import Optional, Tuple, Union
 
 try:
-    # Import the Vzense API
-    # BaseSDK_python_wrapper/DCAM710/API/Vzense_api_710.py
-    from .BaseSDK_python_wrapper.DCAM710.API.Vzense_api_710 import *  # TODO: Get rid of star import
+    # Import the Vzense API - using the actual class structure
+    sys.path.append(os.path.join(Path(__file__).parent, "BaseSDK_python_wrapper"))
+    from DCAM710.API.Vzense_api_710 import VzenseTofCam
+    from DCAM710.API.Vzense_define_710 import *
     VZENSE_AVAILABLE = True
 except ImportError:
     print("Warning: Vzense API not found. Please install the BaseSDK_python_wrapper.")
@@ -56,31 +60,31 @@ class DCAM710Camera:
     A wrapper class for the Pico Zense DCAM710 depth camera.
     
     Provides simple methods to initialize the camera, capture frames,
-    and clean up resources.
+    and clean up resources. Based on the actual Vzense API structure.
     """
     
-    def __init__(self, device_index: int = 0, timeout_ms: int = 1000):
+    def __init__(self, device_index: int = 0, timeout_ms: int = 33):
         """
         Initialize the DCAM710 camera interface.
         
         Args:
             device_index: Index of the device to use (0 for first camera)
-            timeout_ms: Timeout for frame capture in milliseconds
-s        """
+            timeout_ms: Wait time for frame reading in milliseconds
+        """
         if not VZENSE_AVAILABLE:
             raise ImportError("Vzense API not available. Please install the required SDK.")
         
         self.device_index = device_index
         self.timeout_ms = timeout_ms
-        self.device_handle = None
+        self.vzense_cam = None
         self.is_initialized = False
         self.is_streaming = False
         
-        # Camera properties (will be set during initialization)
-        self.depth_width = 0
-        self.depth_height = 0
-        self.color_width = 0
-        self.color_height = 0
+        # Camera properties
+        self.depth_width = 640
+        self.depth_height = 480
+        self.color_width = 1280
+        self.color_height = 720
     
     def __enter__(self):
         """Context manager entry"""
@@ -98,14 +102,11 @@ s        """
             bool: True if initialization successful, False otherwise
         """
         try:
-            # Initialize the SDK
-            ret = Ps2_Initialize()
-            if ret != 0:
-                logger.error(f"Failed to initialize SDK. Error code: {ret}")
-                return False
+            # Create the camera instance (this initializes the SDK)
+            self.vzense_cam = VzenseTofCam()
             
             # Get device count
-            device_count = Ps2_GetDeviceCount()
+            device_count = self.vzense_cam.Ps2_GetDeviceCount()
             if device_count <= self.device_index:
                 logger.error(f"Device index {self.device_index} not found. Available devices: {device_count}")
                 return False
@@ -113,17 +114,21 @@ s        """
             logger.info(f"Found {device_count} device(s)")
             
             # Get device info
-            device_info = Ps2_GetDeviceInfo(self.device_index)
+            ret, device_info = self.vzense_cam.Ps2_GetDeviceInfo(self.device_index)
+            if ret != 0:
+                logger.error(f"Failed to get device info. Error code: {ret}")
+                return False
+                
             logger.info(f"Opening device: {device_info.alias}")
             
-            # Open the device
-            self.device_handle = Ps2_OpenDevice(device_info.uri)
-            if self.device_handle is None:
-                logger.error("Failed to open device")
+            # Open the device using URI
+            ret = self.vzense_cam.Ps2_OpenDevice(device_info.uri)
+            if ret != 0:
+                logger.error(f"Failed to open device. Error code: {ret}")
                 return False
             
-            # Get camera parameters
-            self._get_camera_parameters()
+            # Set up camera parameters
+            self._configure_camera()
             
             self.is_initialized = True
             logger.info("Camera initialized successfully")
@@ -133,66 +138,67 @@ s        """
             logger.error(f"Error during initialization: {e}")
             return False
     
-    def _get_camera_parameters(self):
-        """Get and store camera parameters"""
+    def _configure_camera(self):
+        """Configure camera settings"""
         try:
-            # Get depth stream info
-            depth_info = Ps2_GetStreamInfo(self.device_handle, PsStreamType.PsDepthStream)
-            self.depth_width = depth_info.width
-            self.depth_height = depth_info.height
+            # Set data mode (depth + RGB)
+            ret = self.vzense_cam.Ps2_SetDataMode(PsDataMode.PsDepthAndRGB_30)
+            if ret != 0:
+                logger.warning(f"Failed to set data mode: {ret}")
             
-            # Get color stream info
-            color_info = Ps2_GetStreamInfo(self.device_handle, PsStreamType.PsColorStream)
-            self.color_width = color_info.width
-            self.color_height = color_info.height
+            # Set RGB resolution
+            ret = self.vzense_cam.Ps2_SetRGBResolution(PsResolution.PsRGB_Resolution_1280_720)
+            if ret != 0:
+                logger.warning(f"Failed to set RGB resolution: {ret}")
+            else:
+                self.color_width = 1280
+                self.color_height = 720
             
-            logger.info(f"Depth resolution: {self.depth_width}x{self.depth_height}")
-            logger.info(f"Color resolution: {self.color_width}x{self.color_height}")
+            # Set color pixel format to BGR
+            ret = self.vzense_cam.Ps2_SetColorPixelFormat(PsPixelFormat.PsPixelFormatBGR888)
+            if ret != 0:
+                logger.warning(f"Failed to set color format: {ret}")
+            
+            # Enable RGB and depth frames
+            self.vzense_cam.Ps2_SetRgbFrameEnabled(True)
+            self.vzense_cam.Ps2_SetDepthFrameEnabled(True)
+            
+            # Set frame reading timeout
+            self.vzense_cam.Ps2_SetWaitTimeOfReadNextFrame(self.timeout_ms)
+            
+            logger.info(f"Camera configured - Depth: {self.depth_width}x{self.depth_height}, RGB: {self.color_width}x{self.color_height}")
             
         except Exception as e:
-            logger.warning(f"Could not get camera parameters: {e}")
-            # Set default values
-            self.depth_width = 640
-            self.depth_height = 480
-            self.color_width = 1280
-            self.color_height = 720
+            logger.warning(f"Error during camera configuration: {e}")
     
     def start(self) -> bool:
         """
-        Start depth and color streams.
+        Start camera streaming.
         
         Returns:
-            bool: True if streams started successfully, False otherwise
+            bool: True if streaming started successfully, False otherwise
         """
         if not self.is_initialized:
             if not self.initialize():
                 return False
         
         try:
-            # Start depth stream
-            ret_depth = Ps2_StartStream(self.device_handle, PsStreamType.PsDepthStream)
-            if ret_depth != 0:
-                logger.error(f"Failed to start depth stream. Error code: {ret_depth}")
-                return False
-            
-            # Start color stream
-            ret_color = Ps2_StartStream(self.device_handle, PsStreamType.PsColorStream)
-            if ret_color != 0:
-                logger.error(f"Failed to start color stream. Error code: {ret_color}")
-                # Stop depth stream if color failed
-                Ps2_StopStream(self.device_handle, PsStreamType.PsDepthStream)
+            # Start streaming
+            ret = self.vzense_cam.Ps2_StartStream()
+            if ret != 0:
+                logger.error(f"Failed to start stream. Error code: {ret}")
                 return False
             
             self.is_streaming = True
-            logger.info("Streams started successfully")
+            logger.info("Streaming started successfully")
             
-            # Wait a moment for streams to stabilize
+            # Wait for streams to stabilize
             time.sleep(0.5)
             
             return True
             
         except Exception as e:
-            logger.error(f"Error starting streams: {e}")
+            logger.error(f"Error starting stream: {e}")
             return False
     
     def get_frames(self, return_raw: bool = False) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
@@ -214,24 +220,32 @@ s        """
         depth_image = None
         
         try:
-            # Get depth frame
-            depth_frame = Ps2_ReadNextFrame(self.device_handle, PsStreamType.PsDepthStream)
-            if depth_frame.pFrameData:
-                depth_data = np.frombuffer(depth_frame.pFrameData, dtype=np.uint16)
-                if return_raw:
-                    depth_image = depth_data
-                else:
-                    depth_image = depth_data.reshape((self.depth_height, self.depth_width))
+            # Read next frame - this gets frame ready status
+            ret, frame_ready = self.vzense_cam.Ps2_ReadNextFrame()
+            if ret != 0:
+                logger.debug(f"Frame not ready: {ret}")
+                return None, None
             
-            # Get color frame
-            color_frame = Ps2_ReadNextFrame(self.device_handle, PsStreamType.PsColorStream)
-            if color_frame.pFrameData:
-                color_data = np.frombuffer(color_frame.pFrameData, dtype=np.uint8)
-                if return_raw:
-                    rgb_image = color_data
-                else:
-                    # Assuming BGR format (common for many cameras)
-                    rgb_image = color_data.reshape((self.color_height, self.color_width, 3))
+            # Get depth frame if available
+            if hasattr(frame_ready, 'depth') and frame_ready.depth:
+                ret, depth_frame = self.vzense_cam.Ps2_GetFrame(PsFrameType.PsDepthFrame)
+                if ret == 0 and depth_frame.pFrameData:
+                    depth_data = np.frombuffer(depth_frame.pFrameData, dtype=np.uint16)
+                    if return_raw:
+                        depth_image = depth_data
+                    else:
+                        depth_image = depth_data.reshape((depth_frame.height, depth_frame.width))
+            
+            # Get color frame if available  
+            if hasattr(frame_ready, 'rgb') and frame_ready.rgb:
+                ret, color_frame = self.vzense_cam.Ps2_GetFrame(PsFrameType.PsRGBFrame)
+                if ret == 0 and color_frame.pFrameData:
+                    color_data = np.frombuffer(color_frame.pFrameData, dtype=np.uint8)
+                    if return_raw:
+                        rgb_image = color_data
+                    else:
+                        # BGR format from camera
+                        rgb_image = color_data.reshape((color_frame.height, color_frame.width, 3))
             
         except Exception as e:
             logger.error(f"Error capturing frames: {e}")
@@ -251,10 +265,17 @@ s        """
             return None
         
         try:
-            depth_frame = Ps2_ReadNextFrame(self.device_handle, PsStreamType.PsDepthStream)
-            if depth_frame.pFrameData:
-                depth_data = np.frombuffer(depth_frame.pFrameData, dtype=np.uint16)
-                return depth_data.reshape((self.depth_height, self.depth_width))
+            # Read next frame
+            ret, frame_ready = self.vzense_cam.Ps2_ReadNextFrame()
+            if ret != 0:
+                return None
+            
+            if hasattr(frame_ready, 'depth') and frame_ready.depth:
+                ret, depth_frame = self.vzense_cam.Ps2_GetFrame(PsFrameType.PsDepthFrame)
+                if ret == 0 and depth_frame.pFrameData:
+                    depth_data = np.frombuffer(depth_frame.pFrameData, dtype=np.uint16)
+                    return depth_data.reshape((depth_frame.height, depth_frame.width))
+                    
         except Exception as e:
             logger.error(f"Error capturing depth frame: {e}")
         
@@ -272,10 +293,17 @@ s        """
             return None
         
         try:
-            color_frame = Ps2_ReadNextFrame(self.device_handle, PsStreamType.PsColorStream)
-            if color_frame.pFrameData:
-                color_data = np.frombuffer(color_frame.pFrameData, dtype=np.uint8)
-                return color_data.reshape((self.color_height, self.color_width, 3))
+            # Read next frame
+            ret, frame_ready = self.vzense_cam.Ps2_ReadNextFrame()
+            if ret != 0:
+                return None
+                
+            if hasattr(frame_ready, 'rgb') and frame_ready.rgb:
+                ret, color_frame = self.vzense_cam.Ps2_GetFrame(PsFrameType.PsRGBFrame)
+                if ret == 0 and color_frame.pFrameData:
+                    color_data = np.frombuffer(color_frame.pFrameData, dtype=np.uint8)
+                    return color_data.reshape((color_frame.height, color_frame.width, 3))
+                    
         except Exception as e:
             logger.error(f"Error capturing color frame: {e}")
         
@@ -284,21 +312,25 @@ s        """
     def stop(self):
         """Stop streams and cleanup resources"""
         try:
-            if self.is_streaming and self.device_handle:
-                Ps2_StopStream(self.device_handle, PsStreamType.PsDepthStream)
-                Ps2_StopStream(self.device_handle, PsStreamType.PsColorStream)
+            if self.is_streaming and self.vzense_cam:
+                ret = self.vzense_cam.Ps2_StopStream()
+                if ret == 0:
+                    logger.info("Stream stopped")
+                else:
+                    logger.warning(f"Error stopping stream: {ret}")
                 self.is_streaming = False
-                logger.info("Streams stopped")
             
-            if self.device_handle:
-                Ps2_CloseDevice(self.device_handle)
-                self.device_handle = None
-                logger.info("Device closed")
-            
-            if self.is_initialized:
-                Ps2_Shutdown()
+            if self.vzense_cam:
+                ret = self.vzense_cam.Ps2_CloseDevice()
+                if ret == 0:
+                    logger.info("Device closed")
+                else:
+                    logger.warning(f"Error closing device: {ret}")
+                
+                # The destructor will call Ps2_Shutdown()
+                self.vzense_cam = None
                 self.is_initialized = False
-                logger.info("SDK shutdown")
+                logger.info("SDK cleanup completed")
                 
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
@@ -310,13 +342,89 @@ s        """
         Returns:
             dict: Camera information
         """
-        return {
+        info = {
             'depth_resolution': (self.depth_width, self.depth_height),
             'color_resolution': (self.color_width, self.color_height),
             'is_initialized': self.is_initialized,
             'is_streaming': self.is_streaming,
             'device_index': self.device_index
         }
+        
+        # Add additional info if camera is initialized
+        if self.is_initialized and self.vzense_cam:
+            try:
+                ret, sn = self.vzense_cam.Ps2_GetSerialNumber()
+                if ret == 0:
+                    info['serial_number'] = sn.decode() if isinstance(sn, bytes) else str(sn)
+                
+                ret, fw = self.vzense_cam.Ps2_GetFirmwareVersionNumber()
+                if ret == 0:
+                    info['firmware_version'] = fw.decode() if isinstance(fw, bytes) else str(fw)
+                    
+                ret, sdk_version = self.vzense_cam.Ps2_GetSDKVersion()
+                if ret == 0:
+                    info['sdk_version'] = sdk_version.decode() if isinstance(sdk_version, bytes) else str(sdk_version)
+                    
+            except Exception as e:
+                logger.debug(f"Could not get additional camera info: {e}")
+        
+        return info
+    
+    def set_depth_range(self, depth_range: 'PsDepthRange' = None):
+        """
+        Set the depth range for the camera.
+        
+        Args:
+            depth_range: PsDepthRange enum value (PsNearRange, PsMidRange, PsFarRange, etc.)
+        """
+        if not self.is_initialized:
+            logger.warning("Camera not initialized")
+            return False
+            
+        if depth_range is None:
+            depth_range = PsDepthRange.PsNearRange
+            
+        try:
+            ret = self.vzense_cam.Ps2_SetDepthRange(depth_range)
+            if ret == 0:
+                logger.info(f"Depth range set successfully")
+                return True
+            else:
+                logger.warning(f"Failed to set depth range: {ret}")
+                return False
+        except Exception as e:
+            logger.error(f"Error setting depth range: {e}")
+            return False
+    
+    def get_measuring_range(self, depth_range: 'PsDepthRange' = None) -> dict:
+        """
+        Get measuring range information for specified depth range.
+        
+        Returns:
+            dict: Range information with max_depth, min_effective, max_effective
+        """
+        if not self.is_initialized:
+            logger.warning("Camera not initialized")
+            return {}
+            
+        if depth_range is None:
+            depth_range = PsDepthRange.PsNearRange
+            
+        try:
+            ret, max_depth, min_eff, max_eff = self.vzense_cam.Ps2_GetMeasuringRange(depth_range)
+            if ret == 0:
+                return {
+                    'max_depth': max_depth,
+                    'min_effective': min_eff,
+                    'max_effective': max_eff,
+                    'range_type': str(depth_range)
+                }
+            else:
+                logger.warning(f"Failed to get measuring range: {ret}")
+                return {}
+        except Exception as e:
+            logger.error(f"Error getting measuring range: {e}")
+            return {}
 
 
 # Convenience function for quick testing
@@ -329,7 +437,13 @@ def test_camera():
                 return
             
             print("Camera started successfully!")
-            print(f"Camera info: {camera.get_camera_info()}")
+            camera_info = camera.get_camera_info()
+            print(f"Camera info: {camera_info}")
+            
+            # Test measuring range
+            range_info = camera.get_measuring_range()
+            if range_info:
+                print(f"Measuring range: {range_info}")
             
             # Capture a few frames
             for i in range(5):
