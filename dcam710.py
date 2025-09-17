@@ -63,7 +63,7 @@ class DCAM710Camera:
     and clean up resources. Based on the actual Vzense API structure.
     """
     
-    def __init__(self, device_index: int = 0, timeout_ms: int = 33):
+    def __init__(self, device_index: int = 0, timeout_ms: int = 500):
         """
         Initialize the DCAM710 camera interface.
         
