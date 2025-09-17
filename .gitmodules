@@ -1,3 +1,3 @@
-[submodule "BaseSDK_python_wrapper"]
-	path = BaseSDK_python_wrapper
-	url = https://github.com/Vzense/BaseSDK_python_wrapper.git
+[submodule "VZense_python_wrapper"]
+	path = VZense_python_wrapper
+	url = https://github.com/Christophe-Foyer/VZense_python_wrapper.git
