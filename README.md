@@ -28,3 +28,7 @@ My goal is to get my little robot going around.
 I'll also post a more detailed BOM once it's working.
 
 Enjoy.
+
+## Notes
+
+I recommend installing opencv using `pip install python3-opencv` so it doesn't take a thousand years, I actually disabled that dependency for older pis so it's very recommended.

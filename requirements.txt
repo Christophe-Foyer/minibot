@@ -1,4 +1,4 @@
 numpy
-opencv-python
+opencv-python; platform_machine not in ["armv6l", "armv7l"]
 Flask
 Flask-SocketIO
