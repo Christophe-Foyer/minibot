@@ -39,7 +39,7 @@ from typing import Optional, Tuple, Union
 try:
     # Import the Vzense API
     # BaseSDK_python_wrapper/DCAM710/API/Vzense_api_710.py
-    from BaseSDK_python_wrapper.DCAM710.API.Vzense_api_710 import *  # TODO: Get rid of star import
+    from .BaseSDK_python_wrapper.DCAM710.API.Vzense_api_710 import *  # TODO: Get rid of star import
     VZENSE_AVAILABLE = True
 except ImportError:
     print("Warning: Vzense API not found. Please install the BaseSDK_python_wrapper.")
