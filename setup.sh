@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 
-if [["$(uname -m)" == "armv6l"]]
+arch=$(uname -m)
+if [[ "$arch" == "armv6l" || "$arch" == "armv7l" ]]
 then
   sudo apt install python3-opencv
 else
