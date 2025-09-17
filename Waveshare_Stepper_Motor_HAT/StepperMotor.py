@@ -1,6 +1,6 @@
 import threading
 import time
-from DRV8825 import DRV8825
+from .DRV8825 import DRV8825
 
 class StepperMotor:
     def __init__(self, dir_pin, step_pin, enable_pin,
