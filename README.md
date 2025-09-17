@@ -17,7 +17,14 @@ In terms of equipment, this uses a:
 - Also using some random 2 pin magnet connectors from ebay to dock autonomously, we'll see how that goes
 - if using beefier compute, and probably even if not, you probably want a 40mm fan
 - a bunch of filament (maybe uses ~600-800g?), I suggest PETG as something not too exotic but that survives the sun.
+- you probably want a usb GPS, I'll use a random one from ebay as well.
+- either:
+  - a battery with a voltage < 28v and charger
+  - a battery and charger and a step down converter to step down the voltage to <28v for the waveshare hat (I used an old 36v hoverboard battery + charger)
 
+Also please disregard the quality of this code, for now, this is a very rough prototype.
 There's also some very vibe-coded stuff in here (specifically around the vzense stuff with arcane documentation), I'll properly review it before this makes it to actual deployment.
+My goal is to get my little robot going around.
+I'll also post a more detailed BOM once it's working.
 
 Enjoy.
