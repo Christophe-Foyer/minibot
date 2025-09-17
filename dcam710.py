@@ -41,13 +41,13 @@ from typing import Optional, Tuple, Union
 
 try:
     # Import the Vzense API - using the actual class structure
-    sys.path.append(os.path.join(Path(__file__).parent, "BaseSDK_python_wrapper"))
+    sys.path.append(os.path.join(Path(__file__).parent, "VZense_python_wrapper"))
     from DCAM710.API.Vzense_api_710 import VzenseTofCam
     from DCAM710.API.Vzense_define_710 import *
     VZENSE_AVAILABLE = True
 except ImportError:
-    print("Warning: Vzense API not found. Please install the BaseSDK_python_wrapper.")
-    print("Download from: https://github.com/Vzense/BaseSDK_python_wrapper")
+    print("Warning: Vzense API not found. Please install the VZense_python_wrapper.")
+    print("Download from: https://github.com/Christophe-Foyer/VZense_python_wrapper")
     VZENSE_AVAILABLE = False
 
 # Set up logging
