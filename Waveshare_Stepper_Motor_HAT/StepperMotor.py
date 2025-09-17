@@ -8,9 +8,7 @@ class StepperMotor:
         self.motor = DRV8825(dir_pin=dir_pin,
                              step_pin=step_pin,
                              enable_pin=enable_pin,
-                             microstep1_pin=microstep_pins[0] if microstep_pins else None,
-                             microstep2_pin=microstep_pins[1] if microstep_pins else None,
-                             microstep3_pin=microstep_pins[2] if microstep_pins else None)
+                             mode_pins=microstep_pins)
         self.motor.SetMicroStep('softward', 'fullstep')
         self.step_delay = step_delay
         self.timeout = timeout  # seconds until auto-stop
