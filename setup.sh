@@ -21,6 +21,6 @@ else
   echo "system = Ubuntu18.04" > VZense_python_wrapper/config.txt
   echo "url = https://gitee.com" >> VZense_python_wrapper/config.txt
 fi
-cd VZense_python_wrapper && python install.py && rm -rf tmp; cd ../
+cd VZense_python_wrapper && rm -rf tmp && python install.py && rm -rf tmp; cd ../
 
 echo "Done!"
