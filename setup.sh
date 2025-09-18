@@ -15,12 +15,15 @@ git submodule init && git submodule update
 
 if [[ "$arch" == "armv6l" || "$arch" == "armv7l" ]]
 then
-  echo "system = Arm-linux-gnueabihf" > VZense_python_wrapper/config.txt
-  echo "url = https://github.com" >> VZense_python_wrapper/config.txt
+  subfolder='Arm-linux-gnueabihf'
 else
-  echo "system = Ubuntu18.04" > VZense_python_wrapper/config.txt
-  echo "url = https://github.com" >> VZense_python_wrapper/config.txt
+  subfolder='Ubuntu18.04'
 fi
+echo "system = ${subfolder}" > VZense_python_wrapper/config.txt
+echo "url = https://github.com" >> VZense_python_wrapper/config.txt
+sudo bash VZense_python_wrapper/tmp/
+cd VZense_python_wrapper/tmp/Vzense_SDK_linux/${subfolder} && sudo ./install.sh; cd ../../../../
+
 cd VZense_python_wrapper && rm -rf tmp && python install.py && rm -rf tmp; cd ../
 
 echo "Done!"

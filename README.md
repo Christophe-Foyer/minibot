@@ -24,6 +24,7 @@ In terms of equipment, this uses a:
 
 Also please disregard the quality of this code, for now, this is a very rough prototype.
 There's also some very vibe-coded stuff in here (specifically around the vzense stuff with arcane documentation), I'll properly review it before this makes it to actual deployment.
+Also dubious LLM outputs aren't your only enemy when interfacing with obscure hardware, the API is also pretty rough around the edges.
 My goal is to get my little robot going around.
 I'll also post a more detailed BOM once it's working.
 
@@ -32,3 +33,6 @@ Enjoy.
 ## Notes
 
 I recommend installing opencv using `pip install python3-opencv` so it doesn't take a thousand years, I actually disabled that dependency for older pis so it's very recommended.
+
+Might need to hackishly use ffmpeg to read frames...
+`ffmpeg -f v4l2 -input_format mjpeg -video_size 640x360 -i /dev/video0 -frames:v 1 test.jpg`
