@@ -16,6 +16,9 @@ git submodule update --init
 if [[ "$arch" == "armv6l" || "$arch" == "armv7l" ]]
 then
   subfolder='Arm-linux-gnueabihf'
+elif [[ "$arch" == "aarch64" ]]
+then
+  subfolder='AArch64'
 else
   subfolder='Ubuntu18.04'
 fi
