@@ -7,7 +7,7 @@ If you want to build one yourself, here is a [link to the CAD files](https://cad
 Media will be added eventually (assuming this project makes it to completion).
 
 In terms of equipment, this uses a:
-- raspberry pi - for now, using a pi zero to limit thermal load because I forgot vents in the initial design, but a pi with 64 bit support would be good for ROS.
+- raspberry pi 3 or higher (or pi zero 2)
 - wavshare stepper motor hat
 - two nema 17s
 - an rgbd camera, here a vzense dcam710 but realistically a realsense d435i would be much nicer
