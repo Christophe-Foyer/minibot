@@ -13,6 +13,14 @@ python -m pip install -r requirements.txt
 
 git submodule init && git submodule update
 
-cd VZense_python_wrapper && python install.py; cd ../
+if [[ "$arch" == "armv6l" || "$arch" == "armv7l" ]]
+then
+  echo "system = Arm-linux-gnueabihf" > VZense_python_wrapper/config.txt
+  echo "url = https://gitee.com" >> VZense_python_wrapper/config.txt
+else
+  echo "system = Ubuntu18.04" > VZense_python_wrapper/config.txt
+  echo "url = https://gitee.com" >> VZense_python_wrapper/config.txt
+fi
+cd VZense_python_wrapper && python install.py && rm -rf tmp; cd ../
 
 echo "Done!"
