@@ -1,5 +1,5 @@
 numpy
 opencv-python; platform_machine != "armv6l" and platform_machine != "armv7l"
-RPi.GPIO; platform_machine != "armv6l" or platform_machine != "armv7l" or platform_machine != "aarch64"
+RPi.GPIO; platform_machine == "armv6l" or platform_machine == "armv7l" or platform_machine == "aarch64"
 Flask
 Flask-SocketIO
