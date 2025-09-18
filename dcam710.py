@@ -142,7 +142,7 @@ class DCAM710Camera:
         """Configure camera settings"""
         try:
             # Set data mode (depth + RGB)
-            ret = self.vzense_cam.Ps2_SetDataMode(PsDataMode.PsDepthAndRGB_30)
+            ret = self.vzense_cam.Ps2_SetDataMode(PsDataMode.PsDepthAndRGB_5)
             if ret != 0:
                 logger.warning(f"Failed to set data mode: {ret}")
             
