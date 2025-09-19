@@ -31,19 +31,31 @@ Usage:
         rgb, depth = camera.get_frames()
 """
 
-import numpy as np
-import time
+# %%
+
 import logging
 import os
-from pathlib import Path
 import sys
+import time
+from pathlib import Path
 from typing import Optional, Tuple, Union
+
+import numpy as np
 
 try:
     # Import the Vzense API - using the actual class structure
     sys.path.append(os.path.join(Path(__file__).parent, "VZense_python_wrapper"))
     from DCAM710.API.Vzense_api_710 import VzenseTofCam
-    from DCAM710.API.Vzense_define_710 import *
+    from DCAM710.API.Vzense_enums_710 import (
+        PsDataMode,
+        PsDepthRange,
+        PsFrameType,
+        PsPixelFormat,
+        PsResolution,
+        PsReturnStatus,
+        PsSensorType,
+    )
+    # from DCAM710.API.Vzense_define_710 import *
     VZENSE_AVAILABLE = True
 except ImportError:
     print("Warning: Vzense API not found. Please install the VZense_python_wrapper.")
@@ -51,7 +63,10 @@ except ImportError:
     VZENSE_AVAILABLE = False
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
+else:
+    logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +78,7 @@ class DCAM710Camera:
     and clean up resources. Based on the actual Vzense API structure.
     """
     
-    def __init__(self, device_index: int = 0, timeout_ms: int = 500):
+    def __init__(self, device_index: int = 0, timeout_ms: int = 3000):
         """
         Initialize the DCAM710 camera interface.
         
@@ -82,9 +97,9 @@ class DCAM710Camera:
         
         # Camera properties
         self.depth_width = 640
-        self.depth_height = 480
-        self.color_width = 1280
-        self.color_height = 720
+        self.depth_height = 360
+        self.color_width = 640
+        self.color_height = 360
     
     def __enter__(self):
         """Context manager entry"""
@@ -132,6 +147,7 @@ class DCAM710Camera:
             
             self.is_initialized = True
             logger.info("Camera initialized successfully")
+
             return True
             
         except Exception as e:
@@ -145,14 +161,14 @@ class DCAM710Camera:
             ret = self.vzense_cam.Ps2_SetDataMode(PsDataMode.PsDepthAndRGB_30)
             if ret != 0:
                 logger.warning(f"Failed to set data mode: {ret}")
+            ret, mode = self.vzense_cam.Ps2_GetDataMode()
+            logger.info(f"Active data mode: {mode}, ret={ret}")
+
             
             # Set RGB resolution
-            ret = self.vzense_cam.Ps2_SetRGBResolution(PsResolution.PsRGB_Resolution_1280_720)
+            ret = self.vzense_cam.Ps2_SetRGBResolution(getattr(PsResolution, f"PsRGB_Resolution_{self.color_width}_{self.color_height}"))
             if ret != 0:
                 logger.warning(f"Failed to set RGB resolution: {ret}")
-            else:
-                self.color_width = 1280
-                self.color_height = 720
             
             # Set color pixel format to BGR
             ret = self.vzense_cam.Ps2_SetColorPixelFormat(PsPixelFormat.PsPixelFormatBGR888)
@@ -224,6 +240,7 @@ class DCAM710Camera:
             ret, frame_ready = self.vzense_cam.Ps2_ReadNextFrame()
             if ret != 0:
                 logger.debug(f"Frame not ready: {ret}")
+                logger.debug(f"frame_ready: depth={frame_ready.depth}, rgb={frame_ready.rgb}, ir={frame_ready.ir}")
                 return None, None
             
             # Get depth frame if available
@@ -249,6 +266,8 @@ class DCAM710Camera:
             
         except Exception as e:
             logger.error(f"Error capturing frames: {e}")
+            import code
+            code.interact(local=locals())
             return None, None
         
         return rgb_image, depth_image
@@ -387,7 +406,7 @@ class DCAM710Camera:
         try:
             ret = self.vzense_cam.Ps2_SetDepthRange(depth_range)
             if ret == 0:
-                logger.info(f"Depth range set successfully")
+                logger.info("Depth range set successfully")
                 return True
             else:
                 logger.warning(f"Failed to set depth range: {ret}")
@@ -435,6 +454,8 @@ def test_camera():
             if not camera.start():
                 print("Failed to start camera")
                 return
+
+            time.sleep(5)
             
             print("Camera started successfully!")
             camera_info = camera.get_camera_info()
@@ -446,7 +467,7 @@ def test_camera():
                 print(f"Measuring range: {range_info}")
             
             # Capture a few frames
-            for i in range(5):
+            for i in range(10):
                 rgb, depth = camera.get_frames()
                 if rgb is not None and depth is not None:
                     print(f"Frame {i+1}: RGB shape: {rgb.shape}, Depth shape: {depth.shape}")
@@ -461,7 +482,17 @@ def test_camera():
     except Exception as e:
         print(f"Test error: {e}")
 
+# %%
 
 if __name__ == "__main__":
     # Run test when script is executed directly
     test_camera()
+
+    import code
+    code.interact(local=locals())
+
+# %%
+
+
+
+# %%

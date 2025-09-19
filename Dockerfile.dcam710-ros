@@ -8,8 +8,15 @@ RUN apt-get update && apt-get install -y \
     git \
     libusb-1.0-0-dev \
     ros-noetic-catkin \
-    ros-noetic-image-transport \
+    ros-noetic-message-generation \
+    ros-noetic-message-runtime \
+    ros-noetic-dynamic-reconfigure \
     ros-noetic-camera-info-manager \
+    ros-noetic-image-transport \
+    ros-noetic-cv-bridge \
+    ros-noetic-tf \
+    ros-noetic-tf2-ros \
+    ros-noetic-tf2-geometry-msgs \
     && rm -rf /var/lib/apt/lists/*
 
 # Create catkin workspace
@@ -17,6 +24,23 @@ WORKDIR /root/catkin_ws/src
 
 # Clone the Vzense ROS plugin
 RUN git clone https://github.com/Vzense/Vzense_ROS_Plugin_Linux.git
+
+# Get the correct binaries
+RUN set -eux; \
+    arch=$(uname -m); \
+    if [ "$arch" = "armv6l" ] || [ "$arch" = "armv7l" ]; then \
+        subfolder="Arm-linux-gnueabihf"; \
+    elif [ "$arch" = "aarch64" ]; then \
+        subfolder="AArch64"; \
+    else \
+        subfolder="Ubuntu18.04"; \
+    fi; \
+    echo "Detected arch: $arch -> using subfolder: $subfolder"; \
+    mkdir -p /root/catkin_ws/src/Vzense_ROS_Plugin_Linux/dependencies/Lib; \
+    for sofile in $(curl -s https://api.github.com/repos/Vzense/Vzense_SDK_Linux/contents/$subfolder/Lib | grep '"download_url":' | cut -d'"' -f4); do \
+        echo "Downloading $sofile"; \
+        curl -L -o /root/catkin_ws/src/Vzense_ROS_Plugin_Linux/dependencies/Lib/$(basename $sofile) $sofile; \
+    done
 
 # Build the workspace
 WORKDIR /root/catkin_ws

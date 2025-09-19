@@ -9,6 +9,9 @@ services:
   vzense_camera:
     build:
       dockerfile: Dockerfile.dcam710-ros
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
     container_name: vzense_camera
     depends_on:
       - roscore
