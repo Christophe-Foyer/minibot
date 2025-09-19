@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
     git \
+    usbutils \
     libusb-1.0-0-dev \
     ros-noetic-catkin \
     ros-noetic-message-generation \
@@ -42,13 +43,13 @@ RUN set -eux; \
         curl -L -o /root/catkin_ws/src/Vzense_ROS_Plugin_Linux/dependencies/Lib/$(basename $sofile) $sofile; \
     done
 
-# Build the workspace
+# Build the workspace (safe for Raspberry Pi)
 WORKDIR /root/catkin_ws
-RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
+RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make -j1"
 
 # Source ROS and workspace on startup
 RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc && \
     echo "source /root/catkin_ws/devel/setup.bash" >> /root/.bashrc
 
 # Default entrypoint
-CMD ["bash", "-c", "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && roslaunch vzense_camera vzense_camera.launch"]
+CMD ["bash", "-c", "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && sleep 3 && roslaunch --wait vzense_camera vzense_camera.launch"]

@@ -3,8 +3,8 @@ services:
     image: ros:noetic-ros-core
     container_name: roscore
     command: roscore
-    network_mode: host
     restart: unless-stopped
+    network_mode: host
 
   vzense_camera:
     build:
@@ -17,8 +17,22 @@ services:
       - roscore
     network_mode: host
     devices:
-      - "/dev/bus/usb:/dev/bus/usb"   # pass USB device
+      - "/dev/bus/usb:/dev/bus/usb"   # pass USB devices
+    environment:
+      - ROS_MASTER_URI=http://172.17.0.1:11311
     restart: unless-stopped
+    healthcheck:
+      test: >
+        bash -c "
+        source /opt/ros/noetic/setup.bash &&
+        source /root/catkin_ws/devel/setup.bash &&
+        rostopic list | grep -q '/depth' &&
+        rostopic list | grep -q '/rgb'
+        "
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   ros1_bridge:
     image: ros:galactic-ros1-bridge
@@ -31,3 +45,12 @@ services:
         source /opt/ros/galactic/setup.bash &&
         ros2 run ros1_bridge dynamic_bridge
       "
+
+  robot_web_control:
+    build:
+      dockerfile: Dockerfile.robot_web_control
+    container_name: ros1_bridge
+    depends_on: 
+      - ros1_bridge
+      - vzense_camera
+    network_mode: host
