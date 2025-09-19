@@ -18,13 +18,13 @@ services:
     restart: unless-stopped
 
   ros1_bridge:
-    image: ros:foxy-ros-core
+    image: ros:galactic-ros1-bridge
     container_name: ros1_bridge
-    depends_on: [vzense_ros1]
+    depends_on: [roscore]
     network_mode: host  # needed for ROS1<->ROS2
     command: >
       bash -c "
         source /opt/ros/noetic/setup.bash &&
-        source /opt/ros/foxy/setup.bash &&
+        source /opt/ros/galactic/setup.bash &&
         ros2 run ros1_bridge dynamic_bridge
       "
