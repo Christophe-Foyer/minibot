@@ -1,0 +1,30 @@
+services:
+  roscore:
+    image: ros:noetic-ros-core
+    container_name: roscore
+    command: roscore
+    network_mode: host
+    restart: unless-stopped
+
+  vzense_camera:
+    build:
+      dockerfile: Dockerfile.dcam710-ros
+    container_name: vzense_camera
+    depends_on:
+      - roscore
+    network_mode: host
+    devices:
+      - "/dev/bus/usb:/dev/bus/usb"   # pass USB device
+    restart: unless-stopped
+
+  ros1_bridge:
+    image: ros:foxy-ros-core
+    container_name: ros1_bridge
+    depends_on: [vzense_ros1]
+    network_mode: host  # needed for ROS1<->ROS2
+    command: >
+      bash -c "
+        source /opt/ros/noetic/setup.bash &&
+        source /opt/ros/foxy/setup.bash &&
+        ros2 run ros1_bridge dynamic_bridge
+      "

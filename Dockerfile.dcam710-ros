@@ -1,0 +1,30 @@
+# Base image: ROS Noetic (Ubuntu 20.04)
+FROM ros:noetic-ros-core
+
+# Install build tools and dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    libusb-1.0-0-dev \
+    ros-noetic-catkin \
+    ros-noetic-image-transport \
+    ros-noetic-camera-info-manager \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create catkin workspace
+WORKDIR /root/catkin_ws/src
+
+# Clone the Vzense ROS plugin
+RUN git clone https://github.com/Vzense/Vzense_ROS_Plugin_Linux.git
+
+# Build the workspace
+WORKDIR /root/catkin_ws
+RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
+
+# Source ROS and workspace on startup
+RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc && \
+    echo "source /root/catkin_ws/devel/setup.bash" >> /root/.bashrc
+
+# Default entrypoint
+CMD ["bash", "-c", "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && roslaunch vzense_camera vzense_camera.launch"]
