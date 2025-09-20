@@ -6,12 +6,7 @@ from geometry_msgs.msg import Twist
 import time
 import math
 import threading
-try:
-    import RPi.GPIO as GPIO
-    GPIO_AVAILABLE = True
-except ImportError:
-    GPIO_AVAILABLE = False
-    print("Warning: RPi.GPIO not available. Running in simulation mode.")
+from .DRV8825 import DRV8825
 
 
 class WaveshareStepperNode(Node):
@@ -20,47 +15,56 @@ class WaveshareStepperNode(Node):
         
         # Declare parameters
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
-        self.declare_parameter('wheel_base', 0.16)  # Distance between wheels in meters
-        self.declare_parameter('wheel_diameter', 0.065)  # Wheel diameter in meters
-        self.declare_parameter('steps_per_revolution', 200)  # Steps per motor revolution
+        self.declare_parameter('wheel_base', 0.160)  # Distance between wheels in meters
+        self.declare_parameter('wheel_diameter', 0.200)  # Wheel diameter in meters
+        self.declare_parameter('steps_per_revolution', 200)  # Steps per motor revolution (full steps)
+        self.declare_parameter('microstep_mode', 'fullstep')  # fullstep, halfstep, 1/4step, 1/8step, 1/16step, 1/32step
         self.declare_parameter('max_speed', 1.0)  # Max linear speed in m/s
-        self.declare_parameter('acceleration', 2.0)  # Acceleration in m/s²
-        self.declare_parameter('step_delay', 0.001)  # Minimum delay between steps (seconds)
+        self.declare_parameter('acceleration', 1.0)  # Acceleration in m/s²
+        self.declare_parameter('step_delay', 0.005)  # Delay between steps (seconds)
+        self.declare_parameter('control_frequency', 20.0)  # Control loop frequency (Hz)
         
         # Get parameters
         self.cmd_vel_topic = self.get_parameter('cmd_vel_topic').get_parameter_value().string_value
         self.wheel_base = self.get_parameter('wheel_base').get_parameter_value().double_value
         self.wheel_diameter = self.get_parameter('wheel_diameter').get_parameter_value().double_value
         self.steps_per_revolution = self.get_parameter('steps_per_revolution').get_parameter_value().integer_value
+        self.microstep_mode = self.get_parameter('microstep_mode').get_parameter_value().string_value
         self.max_speed = self.get_parameter('max_speed').get_parameter_value().double_value
         self.acceleration = self.get_parameter('acceleration').get_parameter_value().double_value
         self.step_delay = self.get_parameter('step_delay').get_parameter_value().double_value
+        self.control_frequency = self.get_parameter('control_frequency').get_parameter_value().double_value
         
-        # GPIO Pin definitions for Waveshare Stepper Motor HAT
-        # Motor A (Left wheel)
-        self.MOTOR_A_DIR = 13
-        self.MOTOR_A_STEP = 19
-        self.MOTOR_A_EN = 12
+        # Microstep multipliers
+        self.microstep_multipliers = {
+            'fullstep': 1,
+            'halfstep': 2,
+            '1/4step': 4,
+            '1/8step': 8,
+            '1/16step': 16,
+            '1/32step': 32
+        }
         
-        # Motor B (Right wheel)
-        self.MOTOR_B_DIR = 24
-        self.MOTOR_B_STEP = 18
-        self.MOTOR_B_EN = 4
+        # Calculate actual steps per revolution based on microstepping
+        self.actual_steps_per_rev = self.steps_per_revolution * self.microstep_multipliers.get(self.microstep_mode, 1)
         
         # Calculate wheel circumference and conversion factors
         self.wheel_circumference = math.pi * self.wheel_diameter
-        self.steps_per_meter = self.steps_per_revolution / self.wheel_circumference
+        self.steps_per_meter = self.actual_steps_per_rev / self.wheel_circumference
         
-        # Initialize GPIO
-        self.init_gpio()
+        # Initialize DRV8825 motors
+        self.motor_left = DRV8825(dir_pin=13, step_pin=19, enable_pin=12, mode_pins=(16, 17, 20))
+        self.motor_right = DRV8825(dir_pin=24, step_pin=18, enable_pin=4, mode_pins=(21, 22, 27))
+        
+        # Set microstepping mode
+        self.motor_left.SetMicroStep('softward', self.microstep_mode)
+        self.motor_right.SetMicroStep('softward', self.microstep_mode)
         
         # Motor state variables
         self.target_left_speed = 0.0   # Target speeds in m/s
         self.target_right_speed = 0.0
         self.current_left_speed = 0.0  # Current speeds in m/s
         self.current_right_speed = 0.0
-        self.left_direction = True     # True = forward, False = backward
-        self.right_direction = True
         
         # Threading control
         self.motor_thread_running = True
@@ -80,47 +84,14 @@ class WaveshareStepperNode(Node):
         self.motor_thread.start()
         
         # Timer for speed ramping (smoother acceleration)
-        self.speed_timer = self.create_timer(0.05, self.update_speeds)  # 20Hz
+        self.speed_timer = self.create_timer(1.0/self.control_frequency, self.update_speeds)
         
         self.get_logger().info(f"Waveshare Stepper Motor Node started")
         self.get_logger().info(f"Subscribing to: {self.cmd_vel_topic}")
         self.get_logger().info(f"Wheel base: {self.wheel_base}m, Wheel diameter: {self.wheel_diameter}m")
-        self.get_logger().info(f"Steps per revolution: {self.steps_per_revolution}")
-        self.get_logger().info(f"GPIO available: {GPIO_AVAILABLE}")
-
-    def init_gpio(self):
-        """Initialize GPIO pins"""
-        if not GPIO_AVAILABLE:
-            self.get_logger().warn("GPIO not available - running in simulation mode")
-            return
-            
-        try:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setwarnings(False)
-            
-            # Setup motor A pins
-            GPIO.setup(self.MOTOR_A_DIR, GPIO.OUT)
-            GPIO.setup(self.MOTOR_A_STEP, GPIO.OUT)
-            GPIO.setup(self.MOTOR_A_EN, GPIO.OUT)
-            
-            # Setup motor B pins  
-            GPIO.setup(self.MOTOR_B_DIR, GPIO.OUT)
-            GPIO.setup(self.MOTOR_B_STEP, GPIO.OUT)
-            GPIO.setup(self.MOTOR_B_EN, GPIO.OUT)
-            
-            # Enable motors (active low)
-            GPIO.output(self.MOTOR_A_EN, GPIO.LOW)
-            GPIO.output(self.MOTOR_B_EN, GPIO.LOW)
-            
-            # Set initial direction (forward)
-            GPIO.output(self.MOTOR_A_DIR, GPIO.HIGH)
-            GPIO.output(self.MOTOR_B_DIR, GPIO.HIGH)
-            
-            self.get_logger().info("GPIO initialized successfully")
-            
-        except Exception as e:
-            self.get_logger().error(f"Failed to initialize GPIO: {str(e)}")
-            GPIO_AVAILABLE = False
+        self.get_logger().info(f"Steps per revolution: {self.steps_per_revolution} (base), {self.actual_steps_per_rev} (with {self.microstep_mode})")
+        self.get_logger().info(f"Steps per meter: {self.steps_per_meter:.2f}")
+        self.get_logger().info(f"Control frequency: {self.control_frequency} Hz")
 
     def cmd_vel_callback(self, msg):
         """Handle incoming velocity commands"""
@@ -147,7 +118,7 @@ class WaveshareStepperNode(Node):
     def update_speeds(self):
         """Gradually update current speeds toward target speeds (acceleration limiting)"""
         with self.speed_lock:
-            max_delta = self.acceleration * 0.05  # 20Hz timer = 0.05s interval
+            max_delta = self.acceleration / self.control_frequency  # acceleration per control interval
             
             # Update left speed
             speed_diff = self.target_left_speed - self.current_left_speed
@@ -162,10 +133,6 @@ class WaveshareStepperNode(Node):
                 self.current_right_speed = self.target_right_speed
             else:
                 self.current_right_speed += max_delta if speed_diff > 0 else -max_delta
-            
-            # Update directions
-            self.left_direction = self.current_left_speed >= 0
-            self.right_direction = self.current_right_speed >= 0
 
     def motor_control_loop(self):
         """Main motor control loop running in separate thread"""
@@ -176,22 +143,21 @@ class WaveshareStepperNode(Node):
         while self.motor_thread_running and rclpy.ok():
             current_time = time.time()
             dt = current_time - last_time
+            
+            # Don't process if time step is too small
+            if dt < 0.001:  # 1ms minimum
+                time.sleep(0.001)
+                continue
+                
             last_time = current_time
             
             with self.speed_lock:
-                left_speed = abs(self.current_left_speed)
-                right_speed = abs(self.current_right_speed)
-                left_dir = self.left_direction
-                right_dir = self.right_direction
-            
-            if GPIO_AVAILABLE:
-                # Set motor directions
-                GPIO.output(self.MOTOR_A_DIR, GPIO.HIGH if left_dir else GPIO.LOW)
-                GPIO.output(self.MOTOR_B_DIR, GPIO.HIGH if right_dir else GPIO.LOW)
+                left_speed = self.current_left_speed
+                right_speed = self.current_right_speed
             
             # Calculate steps needed this iteration
-            left_steps_needed = left_speed * self.steps_per_meter * dt
-            right_steps_needed = right_speed * self.steps_per_meter * dt
+            left_steps_needed = abs(left_speed) * self.steps_per_meter * dt
+            right_steps_needed = abs(right_speed) * self.steps_per_meter * dt
             
             # Accumulate fractional steps
             left_step_accumulator += left_steps_needed
@@ -204,45 +170,41 @@ class WaveshareStepperNode(Node):
             left_step_accumulator -= left_steps
             right_step_accumulator -= right_steps
             
-            # Step the motors
-            max_steps = max(left_steps, right_steps)
-            if max_steps > 0:
-                self.step_motors_synchronized(left_steps, right_steps, max_steps)
+            # Step the motors if needed
+            if left_steps > 0:
+                direction = 'forward' if left_speed >= 0 else 'backward'
+                self.step_motor_async(self.motor_left, direction, left_steps)
+            
+            if right_steps > 0:
+                direction = 'forward' if right_speed >= 0 else 'backward'
+                self.step_motor_async(self.motor_right, direction, right_steps)
             
             # Small delay to prevent excessive CPU usage
-            time.sleep(self.step_delay)
+            time.sleep(0.01)  # 10ms
 
-    def step_motors_synchronized(self, left_steps, right_steps, max_steps):
-        """Step both motors in a synchronized manner"""
-        if not GPIO_AVAILABLE:
-            return
-            
-        left_step_interval = max_steps / left_steps if left_steps > 0 else float('inf')
-        right_step_interval = max_steps / right_steps if right_steps > 0 else float('inf')
-        
-        left_next_step = left_step_interval if left_steps > 0 else float('inf')
-        right_next_step = right_step_interval if right_steps > 0 else float('inf')
-        
+    def step_motor_async(self, motor, direction, steps):
+        """Step motor without blocking - simplified version of TurnStep"""
         try:
-            for step in range(max_steps):
-                # Step left motor if needed
-                if step >= left_next_step:
-                    GPIO.output(self.MOTOR_A_STEP, GPIO.HIGH)
-                    time.sleep(self.step_delay / 2)
-                    GPIO.output(self.MOTOR_A_STEP, GPIO.LOW)
-                    left_next_step += left_step_interval
-                
-                # Step right motor if needed
-                if step >= right_next_step:
-                    GPIO.output(self.MOTOR_B_STEP, GPIO.HIGH)
-                    time.sleep(self.step_delay / 2)
-                    GPIO.output(self.MOTOR_B_STEP, GPIO.LOW)
-                    right_next_step += right_step_interval
-                
-                time.sleep(self.step_delay / 2)
+            # Set direction and enable
+            if direction == 'forward':
+                motor.digital_write(motor.enable_pin, 1)
+                motor.digital_write(motor.dir_pin, 0)
+            elif direction == 'backward':
+                motor.digital_write(motor.enable_pin, 1)
+                motor.digital_write(motor.dir_pin, 1)
+            else:
+                motor.digital_write(motor.enable_pin, 0)
+                return
+            
+            # Step the motor
+            for i in range(steps):
+                motor.digital_write(motor.step_pin, True)
+                time.sleep(self.step_delay)
+                motor.digital_write(motor.step_pin, False)
+                time.sleep(self.step_delay)
                 
         except Exception as e:
-            self.get_logger().error(f"Error stepping motors: {str(e)}")
+            self.get_logger().error(f"Error stepping motor: {str(e)}")
 
     def stop_motors(self):
         """Emergency stop - immediately stop all motors"""
@@ -252,12 +214,11 @@ class WaveshareStepperNode(Node):
             self.current_left_speed = 0.0
             self.current_right_speed = 0.0
         
-        if GPIO_AVAILABLE:
-            try:
-                GPIO.output(self.MOTOR_A_EN, GPIO.HIGH)  # Disable motors
-                GPIO.output(self.MOTOR_B_EN, GPIO.HIGH)
-            except Exception:
-                pass
+        try:
+            self.motor_left.Stop()
+            self.motor_right.Stop()
+        except Exception as e:
+            self.get_logger().error(f"Error stopping motors: {str(e)}")
 
     def destroy_node(self):
         """Cleanup when node is destroyed"""
@@ -269,13 +230,7 @@ class WaveshareStepperNode(Node):
         if self.motor_thread.is_alive():
             self.motor_thread.join(timeout=1.0)
         
-        if GPIO_AVAILABLE:
-            try:
-                GPIO.cleanup()
-                self.get_logger().info("GPIO cleaned up")
-            except Exception as e:
-                self.get_logger().error(f"Error cleaning up GPIO: {str(e)}")
-        
+        self.get_logger().info("Motors stopped")
         super().destroy_node()
 
 

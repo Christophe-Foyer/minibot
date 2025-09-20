@@ -60,6 +60,7 @@ services:
       dockerfile: Dockerfile.waveshare_stepper
     container_name: waveshare_stepper
     privileged: true
+    network_mode: host
     devices:
       - /dev/gpiomem:/dev/gpiomem
       - /dev/mem:/dev/mem
