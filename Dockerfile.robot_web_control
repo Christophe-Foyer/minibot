@@ -1,10 +1,6 @@
 # Use ROS 2 Galactic base image with Python 3
 FROM ros:galactic-ros-base
 
-# Set environment variables
-ENV ROS_DOMAIN_ID=0
-ENV ROS_NAMESPACE=/
-
 # Install python3 dependencies for your node
 RUN apt-get update && apt-get install -y \
     python3-pip \
@@ -12,6 +8,10 @@ RUN apt-get update && apt-get install -y \
     ros-galactic-cv-bridge \
     ros-galactic-vision-opencv \
     && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables
+ENV ROS_DOMAIN_ID=0
+ENV ROS_NAMESPACE=/
 
 # Create a workspace
 WORKDIR /root/ros2_ws/src
@@ -31,5 +31,5 @@ SHELL ["/bin/bash", "-c"]
 RUN echo "source /opt/ros/galactic/setup.bash" >> ~/.bashrc
 RUN echo "source /root/ros2_ws/install/setup.bash" >> ~/.bashrc
 
-# Set entrypoint to launch your node
-ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/galactic/setup.bash && source /root/ros2_ws/install/setup.bash && ros2 run robot_web_control webserver.launch.py"]
+# Default entrypoint
+CMD ["/bin/bash", "-c", "source /opt/ros/galactic/setup.bash && source /root/ros2_ws/install/setup.bash && ros2 launch robot_web_control robot_web_control"]

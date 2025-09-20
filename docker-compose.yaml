@@ -49,8 +49,9 @@ services:
   robot_web_control:
     build:
       dockerfile: Dockerfile.robot_web_control
-    container_name: ros1_bridge
+    container_name: robot_web_control
     depends_on: 
       - ros1_bridge
       - vzense_camera
     network_mode: host
+    command: sleep infinity
