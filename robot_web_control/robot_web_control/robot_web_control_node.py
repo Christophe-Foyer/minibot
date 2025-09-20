@@ -125,7 +125,6 @@ class RobotControlWebNode(Node):
         except Exception as e:
             self.get_logger().error(f'Error processing image: {str(e)}')
 
-    def camera_loop(self):
     def publish_cmd_vel(self):
         """Publish velocity commands to ROS2 topic"""
         twist = Twist()
@@ -135,7 +134,7 @@ class RobotControlWebNode(Node):
 
     def run_web_server(self):
         """Run Flask-SocketIO web server"""
-        self.socketio.run(self.app, host='0.0.0.0', port=self.web_port, debug=False)
+        self.socketio.run(self.app, host='0.0.0.0', port=self.web_port, debug=False, allow_unsafe_werkzeug=True)
 
     def destroy_node(self):
         """Cleanup when node is destroyed"""

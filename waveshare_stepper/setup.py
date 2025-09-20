@@ -2,8 +2,7 @@ from setuptools import setup
 import os
 from glob import glob
 
-package_name = 'robot_web_control'
-
+package_name = 'waveshare_stepper'
 
 setup(
     name=package_name,
@@ -17,20 +16,16 @@ setup(
     ],
     install_requires=[
         'setuptools',
-        'flask>=2.0.0',
-        'flask-socketio>=5.0.0', 
-        'python-socketio>=5.0.0',
-        'opencv-python>=4.5.0',
+        'RPi.GPIO',
     ],
     zip_safe=True,
     maintainer='Christophe Foyer',
     maintainer_email='your.email@example.com',
-    description='ROS2 robot control node with web interface',
+    description='Waveshare stepper motor driver for ROS2',
     license='MIT',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'robot_web_control = robot_web_control.robot_web_control_node:main',
+            'waveshare_stepper_node = waveshare_stepper.waveshare_stepper_node:main',
         ],
     },
 )

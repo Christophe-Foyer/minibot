@@ -1,0 +1,47 @@
+# Dockerfile for Waveshare Stepper Motor Node
+FROM ros:galactic-ros-base
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV ROS_DOMAIN_ID=0
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    python3-setuptools \
+    python3-colcon-common-extensions \
+    ros-galactic-geometry-msgs \
+    ros-galactic-rclpy \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies for Raspberry Pi GPIO
+RUN pip3 install --no-cache-dir \
+    RPi.GPIO \
+    gpiozero
+
+# Create workspace
+WORKDIR /root/ros2_ws/src
+
+# Copy the stepper motor package
+COPY ./waveshare_stepper/ ./waveshare_stepper/
+
+# Build the workspace
+WORKDIR /root/ros2_ws
+RUN /bin/bash -c "source /opt/ros/galactic/setup.bash && \
+    colcon build --symlink-install"
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Source ROS2 setup\n\
+source /opt/ros/galactic/setup.bash\n\
+source /root/ros2_ws/install/setup.bash\n\
+\n\
+# Execute the command\n\
+exec "$@"' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["ros2", "run", "waveshare_stepper", "waveshare_stepper_node"]

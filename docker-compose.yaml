@@ -54,4 +54,20 @@ services:
       - ros1_bridge
       - vzense_camera
     network_mode: host
-    command: sleep infinity
+
+  waveshare_stepper:
+    build:
+      dockerfile: Dockerfile.waveshare_stepper
+    container_name: waveshare_stepper
+    privileged: true
+    devices:
+      - /dev/gpiomem:/dev/gpiomem
+      - /dev/mem:/dev/mem
+    volumes:
+      - /sys/class/gpio:/sys/class/gpio
+    # command: >
+    #   ros2 run waveshare_stepper waveshare_stepper_node
+    #     --ros-args
+    #     -p cmd_vel_topic:=/cmd_vel
+    #     -p wheel_base:=0.16
+    #     -p max_speed:=0.5

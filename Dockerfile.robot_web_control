@@ -1,35 +1,65 @@
 # Use ROS 2 Galactic base image with Python 3
 FROM ros:galactic-ros-base
 
-# Install python3 dependencies for your node
+# Install system dependencies and ROS2 packages
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-setuptools \
+    python3-opencv \
+    python3-colcon-common-extensions \
     ros-galactic-cv-bridge \
     ros-galactic-vision-opencv \
+    ros-galactic-sensor-msgs \
+    ros-galactic-geometry-msgs \
+    ros-galactic-std-msgs \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir \
+    flask>=2.0.0 \
+    flask-socketio>=5.0.0 \
+    python-socketio>=5.0.0 \
+    opencv-python>=4.5.0
 
 # Set environment variables
 ENV ROS_DOMAIN_ID=0
 ENV ROS_NAMESPACE=/
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
 
 # Create a workspace
 WORKDIR /root/ros2_ws/src
 
 # Copy your Python ROS 2 package into the workspace
-COPY ./robot_web_control/ .
+COPY ./robot_web_control/ ./robot_web_control/
 
 # Build the workspace
 WORKDIR /root/ros2_ws
-RUN . /opt/ros/galactic/setup.sh && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -y && \
-    colcon build --symlink-install
+RUN /bin/bash -c "source /opt/ros/galactic/setup.bash && \
+    colcon build --symlink-install"
 
-# Source ROS 2 and workspace
-SHELL ["/bin/bash", "-c"]
-RUN echo "source /opt/ros/galactic/setup.bash" >> ~/.bashrc
-RUN echo "source /root/ros2_ws/install/setup.bash" >> ~/.bashrc
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Source ROS2 setup\n\
+source /opt/ros/galactic/setup.bash\n\
+\n\
+# Source local workspace\n\
+source /root/ros2_ws/install/setup.bash\n\
+\n\
+# Add ROS2 Python packages to PYTHONPATH\n\
+export PYTHONPATH="/opt/ros/galactic/lib/python3.9/site-packages:${PYTHONPATH}"\n\
+\n\
+# Execute the command\n\
+exec "$@"' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
 
-# Default entrypoint
-CMD ["/bin/bash", "-c", "source /opt/ros/galactic/setup.bash && source /root/ros2_ws/install/setup.bash && ros2 launch robot_web_control robot_web_control"]
+# Expose web interface port
+EXPOSE 5000
+
+# Set the entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Launch the webserver
+CMD ["ros2", "launch", "robot_web_control", "robot_web_control.launch.py"]
