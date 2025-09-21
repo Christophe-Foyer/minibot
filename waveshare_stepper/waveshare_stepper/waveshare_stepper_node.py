@@ -15,14 +15,17 @@ class WaveshareStepperNode(Node):
         
         # Declare parameters
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
-        self.declare_parameter('wheel_base', 0.160)  # Distance between wheels in meters
-        self.declare_parameter('wheel_diameter', 0.200)  # Wheel diameter in meters
+        self.declare_parameter('wheel_base', 0.16)  # Distance between wheels in meters
+        self.declare_parameter('wheel_diameter', 0.065)  # Wheel diameter in meters
         self.declare_parameter('steps_per_revolution', 200)  # Steps per motor revolution (full steps)
         self.declare_parameter('microstep_mode', 'fullstep')  # fullstep, halfstep, 1/4step, 1/8step, 1/16step, 1/32step
-        self.declare_parameter('max_speed', 1.0)  # Max linear speed in m/s
-        self.declare_parameter('acceleration', 1.0)  # Acceleration in m/s²
+        self.declare_parameter('max_speed', 5.0)  # Max linear speed in m/s
+        self.declare_parameter('acceleration', 2.0)  # Acceleration in m/s²
         self.declare_parameter('step_delay', 0.005)  # Delay between steps (seconds)
         self.declare_parameter('control_frequency', 20.0)  # Control loop frequency (Hz)
+        self.declare_parameter('motor_hold_timeout', 2.0)  # Time in seconds to hold motors after stop (-1 = hold forever)
+        self.declare_parameter('invert_left_motor', False)  # Invert left motor direction
+        self.declare_parameter('invert_right_motor', False)  # Invert right motor direction
         
         # Get parameters
         self.cmd_vel_topic = self.get_parameter('cmd_vel_topic').get_parameter_value().string_value
@@ -34,6 +37,9 @@ class WaveshareStepperNode(Node):
         self.acceleration = self.get_parameter('acceleration').get_parameter_value().double_value
         self.step_delay = self.get_parameter('step_delay').get_parameter_value().double_value
         self.control_frequency = self.get_parameter('control_frequency').get_parameter_value().double_value
+        self.motor_hold_timeout = self.get_parameter('motor_hold_timeout').get_parameter_value().double_value
+        self.invert_left_motor = self.get_parameter('invert_left_motor').get_parameter_value().bool_value
+        self.invert_right_motor = self.get_parameter('invert_right_motor').get_parameter_value().bool_value
         
         # Microstep multipliers
         self.microstep_multipliers = {
@@ -66,6 +72,10 @@ class WaveshareStepperNode(Node):
         self.current_left_speed = 0.0  # Current speeds in m/s
         self.current_right_speed = 0.0
         
+        # Motor hold timeout variables
+        self.last_movement_time = time.time()
+        self.motors_enabled = True
+        
         # Threading control
         self.motor_thread_running = True
         self.speed_lock = threading.Lock()
@@ -83,8 +93,9 @@ class WaveshareStepperNode(Node):
         self.motor_thread.daemon = True
         self.motor_thread.start()
         
-        # Timer for speed ramping (smoother acceleration)
+        # Timer for speed ramping and motor timeout checking
         self.speed_timer = self.create_timer(1.0/self.control_frequency, self.update_speeds)
+        self.timeout_timer = self.create_timer(0.1, self.check_motor_timeout)  # Check timeout every 100ms
         
         self.get_logger().info(f"Waveshare Stepper Motor Node started")
         self.get_logger().info(f"Subscribing to: {self.cmd_vel_topic}")
@@ -92,6 +103,8 @@ class WaveshareStepperNode(Node):
         self.get_logger().info(f"Steps per revolution: {self.steps_per_revolution} (base), {self.actual_steps_per_rev} (with {self.microstep_mode})")
         self.get_logger().info(f"Steps per meter: {self.steps_per_meter:.2f}")
         self.get_logger().info(f"Control frequency: {self.control_frequency} Hz")
+        self.get_logger().info(f"Motor hold timeout: {self.motor_hold_timeout}s {'(infinite hold)' if self.motor_hold_timeout < 0 else ''}")
+        self.get_logger().info(f"Motor inversions - Left: {self.invert_left_motor}, Right: {self.invert_right_motor}")
 
     def cmd_vel_callback(self, msg):
         """Handle incoming velocity commands"""
@@ -99,8 +112,6 @@ class WaveshareStepperNode(Node):
         angular_vel = msg.angular.z  # Rotational velocity
         
         # Convert to differential drive wheel speeds
-        # v_left = linear - (angular * wheelbase / 2)
-        # v_right = linear + (angular * wheelbase / 2)
         left_speed = linear_vel - (angular_vel * self.wheel_base / 2.0)
         right_speed = linear_vel + (angular_vel * self.wheel_base / 2.0)
         
@@ -111,6 +122,12 @@ class WaveshareStepperNode(Node):
         with self.speed_lock:
             self.target_left_speed = left_speed
             self.target_right_speed = right_speed
+            
+            # Update last movement time if there's any commanded motion
+            if abs(left_speed) > 0.001 or abs(right_speed) > 0.001:
+                self.last_movement_time = time.time()
+                if not self.motors_enabled:
+                    self.enable_motors()
         
         self.get_logger().debug(f"Cmd: linear={linear_vel:.2f}, angular={angular_vel:.2f} -> "
                                f"left={left_speed:.2f}, right={right_speed:.2f}")
@@ -133,6 +150,44 @@ class WaveshareStepperNode(Node):
                 self.current_right_speed = self.target_right_speed
             else:
                 self.current_right_speed += max_delta if speed_diff > 0 else -max_delta
+
+    def check_motor_timeout(self):
+        """Check if motors should be disabled due to timeout"""
+        if self.motor_hold_timeout < 0:  # -1 means hold forever
+            return
+            
+        current_time = time.time()
+        time_since_movement = current_time - self.last_movement_time
+        
+        # Check if we should disable motors due to timeout
+        with self.speed_lock:
+            motors_stopped = (abs(self.current_left_speed) < 0.001 and 
+                            abs(self.current_right_speed) < 0.001)
+            
+        if motors_stopped and time_since_movement > self.motor_hold_timeout and self.motors_enabled:
+            self.get_logger().info("Motor hold timeout reached - disabling motors")
+            self.disable_motors()
+
+    def enable_motors(self):
+        """Enable both motors"""
+        try:
+            # Enable by setting enable pin high (for DRV8825, this enables the motor)
+            self.motor_left.digital_write(self.motor_left.enable_pin, 1)
+            self.motor_right.digital_write(self.motor_right.enable_pin, 1)
+            self.motors_enabled = True
+            self.get_logger().debug("Motors enabled")
+        except Exception as e:
+            self.get_logger().error(f"Error enabling motors: {str(e)}")
+
+    def disable_motors(self):
+        """Disable both motors to reduce power consumption and holding torque"""
+        try:
+            self.motor_left.Stop()
+            self.motor_right.Stop() 
+            self.motors_enabled = False
+            self.get_logger().debug("Motors disabled")
+        except Exception as e:
+            self.get_logger().error(f"Error disabling motors: {str(e)}")
 
     def motor_control_loop(self):
         """Main motor control loop running in separate thread"""
@@ -173,10 +228,16 @@ class WaveshareStepperNode(Node):
             # Step the motors if needed
             if left_steps > 0:
                 direction = 'forward' if left_speed >= 0 else 'backward'
+                # Apply motor inversion
+                if self.invert_left_motor:
+                    direction = 'backward' if direction == 'forward' else 'forward'
                 self.step_motor_async(self.motor_left, direction, left_steps)
             
             if right_steps > 0:
                 direction = 'forward' if right_speed >= 0 else 'backward'
+                # Apply motor inversion  
+                if self.invert_right_motor:
+                    direction = 'backward' if direction == 'forward' else 'forward'
                 self.step_motor_async(self.motor_right, direction, right_steps)
             
             # Small delay to prevent excessive CPU usage
