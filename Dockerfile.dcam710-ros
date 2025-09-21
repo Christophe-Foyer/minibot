@@ -18,13 +18,15 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-tf \
     ros-noetic-tf2-ros \
     ros-noetic-tf2-geometry-msgs \
+    ros-noetic-nodelet \
+    ros-noetic-image-proc \
     && rm -rf /var/lib/apt/lists/*
 
 # Create catkin workspace
 WORKDIR /root/catkin_ws/src
 
 # Clone the Vzense ROS plugin
-RUN git clone https://github.com/Vzense/Vzense_ROS_Plugin_Linux.git
+RUN git clone https://github.com/Vzense/Vzense_ROS_Plugin_Linux
 
 # Get the correct binaries
 RUN set -eux; \
@@ -43,7 +45,8 @@ RUN set -eux; \
         curl -L -o /root/catkin_ws/src/Vzense_ROS_Plugin_Linux/dependencies/Lib/$(basename $sofile) $sofile; \
     done
 
-# Build the workspace (safe for Raspberry Pi)
+# Build the workspace (safe for Raspberry Pi)\
+
 WORKDIR /root/catkin_ws
 RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make -j1"
 
@@ -52,4 +55,4 @@ RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc && \
     echo "source /root/catkin_ws/devel/setup.bash" >> /root/.bashrc
 
 # Default entrypoint
-CMD ["bash", "-c", "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && sleep 3 && roslaunch --wait vzense_camera vzense_camera.launch"]
+CMD ["bash", "-c", "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && sleep 3 && roslaunch --wait vzense_camera vzense_camera_with_flip.launch"]

@@ -9,6 +9,92 @@ import threading
 from .DRV8825 import DRV8825
 
 
+class MotorThread:
+    """Individual motor control thread"""
+    def __init__(self, motor, name, invert=False, steps_per_meter=1000, step_delay=0.005, timeout=2.0):
+        self.motor = motor
+        self.name = name
+        self.invert = invert
+        self.steps_per_meter = steps_per_meter
+        self.step_delay = step_delay
+        self.timeout = timeout
+        
+        # Thread control
+        self.velocity = 0.0  # Current target velocity in m/s
+        self.last_command_time = time.time()
+        self.running = True
+        self.velocity_lock = threading.Lock()
+        
+        # Start the thread
+        self.thread = threading.Thread(target=self._run)
+        self.thread.daemon = True
+        self.thread.start()
+    
+    def set_velocity(self, velocity):
+        """Set target velocity for this motor"""
+        with self.velocity_lock:
+            self.velocity = velocity
+            self.last_command_time = time.time()
+    
+    def stop(self):
+        """Stop the motor thread"""
+        self.running = False
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+        self.motor.Stop()
+    
+    def _run(self):
+        """Main motor control loop"""
+        while self.running:
+            current_time = time.time()
+            
+            with self.velocity_lock:
+                vel = self.velocity
+                last_cmd_time = self.last_command_time
+            
+            # Check for timeout
+            if current_time - last_cmd_time > self.timeout:
+                vel = 0.0  # Stop if command is stale
+            
+            if abs(vel) < 0.001:  # Motor is stopped
+                self.motor.Stop()
+                time.sleep(0.1)  # Check every 100ms when stopped
+                continue
+            
+            # Calculate step timing
+            abs_vel = abs(vel)
+            steps_per_sec = abs_vel * self.steps_per_meter
+            
+            if steps_per_sec > 0:
+                time_between_steps = 1.0 / steps_per_sec
+                time_between_steps = max(time_between_steps, self.step_delay * 2)  # Minimum step time
+            else:
+                time.sleep(0.1)
+                continue
+            
+            # Determine direction
+            direction = 'forward' if vel >= 0 else 'backward'
+            if self.invert:
+                direction = 'backward' if direction == 'forward' else 'forward'
+            
+            # Set motor direction and enable
+            self.motor.digital_write(self.motor.enable_pin, 1)
+            if direction == 'forward':
+                self.motor.digital_write(self.motor.dir_pin, 0)
+            else:
+                self.motor.digital_write(self.motor.dir_pin, 1)
+            
+            # Single step
+            self.motor.digital_write(self.motor.step_pin, True)
+            time.sleep(self.step_delay)
+            self.motor.digital_write(self.motor.step_pin, False)
+            
+            # Wait for next step
+            remaining_time = time_between_steps - self.step_delay
+            if remaining_time > 0:
+                time.sleep(remaining_time)
+
+
 class WaveshareStepperNode(Node):
     def __init__(self):
         super().__init__('waveshare_stepper_node')
@@ -19,13 +105,11 @@ class WaveshareStepperNode(Node):
         self.declare_parameter('wheel_diameter', 0.065)  # Wheel diameter in meters
         self.declare_parameter('steps_per_revolution', 200)  # Steps per motor revolution (full steps)
         self.declare_parameter('microstep_mode', 'fullstep')  # fullstep, halfstep, 1/4step, 1/8step, 1/16step, 1/32step
-        self.declare_parameter('max_speed', 5.0)  # Max linear speed in m/s
-        self.declare_parameter('acceleration', 2.0)  # Acceleration in m/s²
-        self.declare_parameter('step_delay', 0.005)  # Delay between steps (seconds)
-        self.declare_parameter('control_frequency', 20.0)  # Control loop frequency (Hz)
-        self.declare_parameter('motor_hold_timeout', 2.0)  # Time in seconds to hold motors after stop (-1 = hold forever)
+        self.declare_parameter('max_speed', 1.0)  # Max linear speed in m/s
+        self.declare_parameter('step_delay', 0.001)  # Delay between steps (seconds)
+        self.declare_parameter('motor_timeout', 2.0)  # Time in seconds before motor stops if no commands
         self.declare_parameter('invert_left_motor', False)  # Invert left motor direction
-        self.declare_parameter('invert_right_motor', False)  # Invert right motor direction
+        self.declare_parameter('invert_right_motor', True)  # Invert right motor direction (default for differential drive)
         
         # Get parameters
         self.cmd_vel_topic = self.get_parameter('cmd_vel_topic').get_parameter_value().string_value
@@ -34,10 +118,8 @@ class WaveshareStepperNode(Node):
         self.steps_per_revolution = self.get_parameter('steps_per_revolution').get_parameter_value().integer_value
         self.microstep_mode = self.get_parameter('microstep_mode').get_parameter_value().string_value
         self.max_speed = self.get_parameter('max_speed').get_parameter_value().double_value
-        self.acceleration = self.get_parameter('acceleration').get_parameter_value().double_value
         self.step_delay = self.get_parameter('step_delay').get_parameter_value().double_value
-        self.control_frequency = self.get_parameter('control_frequency').get_parameter_value().double_value
-        self.motor_hold_timeout = self.get_parameter('motor_hold_timeout').get_parameter_value().double_value
+        self.motor_timeout = self.get_parameter('motor_timeout').get_parameter_value().double_value
         self.invert_left_motor = self.get_parameter('invert_left_motor').get_parameter_value().bool_value
         self.invert_right_motor = self.get_parameter('invert_right_motor').get_parameter_value().bool_value
         
@@ -59,26 +141,31 @@ class WaveshareStepperNode(Node):
         self.steps_per_meter = self.actual_steps_per_rev / self.wheel_circumference
         
         # Initialize DRV8825 motors
-        self.motor_left = DRV8825(dir_pin=13, step_pin=19, enable_pin=12, mode_pins=(16, 17, 20))
-        self.motor_right = DRV8825(dir_pin=24, step_pin=18, enable_pin=4, mode_pins=(21, 22, 27))
+        motor_left_hw = DRV8825(dir_pin=13, step_pin=19, enable_pin=12, mode_pins=(16, 17, 20))
+        motor_right_hw = DRV8825(dir_pin=24, step_pin=18, enable_pin=4, mode_pins=(21, 22, 27))
         
         # Set microstepping mode
-        self.motor_left.SetMicroStep('softward', self.microstep_mode)
-        self.motor_right.SetMicroStep('softward', self.microstep_mode)
+        motor_left_hw.SetMicroStep('softward', self.microstep_mode)
+        motor_right_hw.SetMicroStep('softward', self.microstep_mode)
         
-        # Motor state variables
-        self.target_left_speed = 0.0   # Target speeds in m/s
-        self.target_right_speed = 0.0
-        self.current_left_speed = 0.0  # Current speeds in m/s
-        self.current_right_speed = 0.0
+        # Create motor threads
+        self.motor_left = MotorThread(
+            motor=motor_left_hw,
+            name="left",
+            invert=self.invert_left_motor,
+            steps_per_meter=self.steps_per_meter,
+            step_delay=self.step_delay,
+            timeout=self.motor_timeout
+        )
         
-        # Motor hold timeout variables
-        self.last_movement_time = time.time()
-        self.motors_enabled = True
-        
-        # Threading control
-        self.motor_thread_running = True
-        self.speed_lock = threading.Lock()
+        self.motor_right = MotorThread(
+            motor=motor_right_hw,
+            name="right", 
+            invert=self.invert_right_motor,
+            steps_per_meter=self.steps_per_meter,
+            step_delay=self.step_delay,
+            timeout=self.motor_timeout
+        )
         
         # Subscribe to cmd_vel
         self.cmd_vel_subscriber = self.create_subscription(
@@ -88,26 +175,16 @@ class WaveshareStepperNode(Node):
             10
         )
         
-        # Start motor control thread
-        self.motor_thread = threading.Thread(target=self.motor_control_loop)
-        self.motor_thread.daemon = True
-        self.motor_thread.start()
-        
-        # Timer for speed ramping and motor timeout checking
-        self.speed_timer = self.create_timer(1.0/self.control_frequency, self.update_speeds)
-        self.timeout_timer = self.create_timer(0.1, self.check_motor_timeout)  # Check timeout every 100ms
-        
         self.get_logger().info(f"Waveshare Stepper Motor Node started")
         self.get_logger().info(f"Subscribing to: {self.cmd_vel_topic}")
         self.get_logger().info(f"Wheel base: {self.wheel_base}m, Wheel diameter: {self.wheel_diameter}m")
         self.get_logger().info(f"Steps per revolution: {self.steps_per_revolution} (base), {self.actual_steps_per_rev} (with {self.microstep_mode})")
         self.get_logger().info(f"Steps per meter: {self.steps_per_meter:.2f}")
-        self.get_logger().info(f"Control frequency: {self.control_frequency} Hz")
-        self.get_logger().info(f"Motor hold timeout: {self.motor_hold_timeout}s {'(infinite hold)' if self.motor_hold_timeout < 0 else ''}")
+        self.get_logger().info(f"Motor timeout: {self.motor_timeout}s")
         self.get_logger().info(f"Motor inversions - Left: {self.invert_left_motor}, Right: {self.invert_right_motor}")
 
     def cmd_vel_callback(self, msg):
-        """Handle incoming velocity commands"""
+        """Handle incoming velocity commands - simple conversion and dispatch"""
         linear_vel = msg.linear.x  # Forward/backward velocity
         angular_vel = msg.angular.z  # Rotational velocity
         
@@ -119,177 +196,20 @@ class WaveshareStepperNode(Node):
         left_speed = max(min(left_speed, self.max_speed), -self.max_speed)
         right_speed = max(min(right_speed, self.max_speed), -self.max_speed)
         
-        with self.speed_lock:
-            self.target_left_speed = left_speed
-            self.target_right_speed = right_speed
-            
-            # Update last movement time if there's any commanded motion
-            if abs(left_speed) > 0.001 or abs(right_speed) > 0.001:
-                self.last_movement_time = time.time()
-                if not self.motors_enabled:
-                    self.enable_motors()
+        # Send velocities to motor threads
+        self.motor_left.set_velocity(left_speed)
+        self.motor_right.set_velocity(right_speed)
         
         self.get_logger().debug(f"Cmd: linear={linear_vel:.2f}, angular={angular_vel:.2f} -> "
                                f"left={left_speed:.2f}, right={right_speed:.2f}")
-
-    def update_speeds(self):
-        """Gradually update current speeds toward target speeds (acceleration limiting)"""
-        with self.speed_lock:
-            max_delta = self.acceleration / self.control_frequency  # acceleration per control interval
-            
-            # Update left speed
-            speed_diff = self.target_left_speed - self.current_left_speed
-            if abs(speed_diff) <= max_delta:
-                self.current_left_speed = self.target_left_speed
-            else:
-                self.current_left_speed += max_delta if speed_diff > 0 else -max_delta
-            
-            # Update right speed
-            speed_diff = self.target_right_speed - self.current_right_speed
-            if abs(speed_diff) <= max_delta:
-                self.current_right_speed = self.target_right_speed
-            else:
-                self.current_right_speed += max_delta if speed_diff > 0 else -max_delta
-
-    def check_motor_timeout(self):
-        """Check if motors should be disabled due to timeout"""
-        if self.motor_hold_timeout < 0:  # -1 means hold forever
-            return
-            
-        current_time = time.time()
-        time_since_movement = current_time - self.last_movement_time
-        
-        # Check if we should disable motors due to timeout
-        with self.speed_lock:
-            motors_stopped = (abs(self.current_left_speed) < 0.001 and 
-                            abs(self.current_right_speed) < 0.001)
-            
-        if motors_stopped and time_since_movement > self.motor_hold_timeout and self.motors_enabled:
-            self.get_logger().info("Motor hold timeout reached - disabling motors")
-            self.disable_motors()
-
-    def enable_motors(self):
-        """Enable both motors"""
-        try:
-            # Enable by setting enable pin high (for DRV8825, this enables the motor)
-            self.motor_left.digital_write(self.motor_left.enable_pin, 1)
-            self.motor_right.digital_write(self.motor_right.enable_pin, 1)
-            self.motors_enabled = True
-            self.get_logger().debug("Motors enabled")
-        except Exception as e:
-            self.get_logger().error(f"Error enabling motors: {str(e)}")
-
-    def disable_motors(self):
-        """Disable both motors to reduce power consumption and holding torque"""
-        try:
-            self.motor_left.Stop()
-            self.motor_right.Stop() 
-            self.motors_enabled = False
-            self.get_logger().debug("Motors disabled")
-        except Exception as e:
-            self.get_logger().error(f"Error disabling motors: {str(e)}")
-
-    def motor_control_loop(self):
-        """Main motor control loop running in separate thread"""
-        last_time = time.time()
-        left_step_accumulator = 0.0
-        right_step_accumulator = 0.0
-        
-        while self.motor_thread_running and rclpy.ok():
-            current_time = time.time()
-            dt = current_time - last_time
-            
-            # Don't process if time step is too small
-            if dt < 0.001:  # 1ms minimum
-                time.sleep(0.001)
-                continue
-                
-            last_time = current_time
-            
-            with self.speed_lock:
-                left_speed = self.current_left_speed
-                right_speed = self.current_right_speed
-            
-            # Calculate steps needed this iteration
-            left_steps_needed = abs(left_speed) * self.steps_per_meter * dt
-            right_steps_needed = abs(right_speed) * self.steps_per_meter * dt
-            
-            # Accumulate fractional steps
-            left_step_accumulator += left_steps_needed
-            right_step_accumulator += right_steps_needed
-            
-            # Execute whole steps
-            left_steps = int(left_step_accumulator)
-            right_steps = int(right_step_accumulator)
-            
-            left_step_accumulator -= left_steps
-            right_step_accumulator -= right_steps
-            
-            # Step the motors if needed
-            if left_steps > 0:
-                direction = 'forward' if left_speed >= 0 else 'backward'
-                # Apply motor inversion
-                if self.invert_left_motor:
-                    direction = 'backward' if direction == 'forward' else 'forward'
-                self.step_motor_async(self.motor_left, direction, left_steps)
-            
-            if right_steps > 0:
-                direction = 'forward' if right_speed >= 0 else 'backward'
-                # Apply motor inversion  
-                if self.invert_right_motor:
-                    direction = 'backward' if direction == 'forward' else 'forward'
-                self.step_motor_async(self.motor_right, direction, right_steps)
-            
-            # Small delay to prevent excessive CPU usage
-            time.sleep(0.01)  # 10ms
-
-    def step_motor_async(self, motor, direction, steps):
-        """Step motor without blocking - simplified version of TurnStep"""
-        try:
-            # Set direction and enable
-            if direction == 'forward':
-                motor.digital_write(motor.enable_pin, 1)
-                motor.digital_write(motor.dir_pin, 0)
-            elif direction == 'backward':
-                motor.digital_write(motor.enable_pin, 1)
-                motor.digital_write(motor.dir_pin, 1)
-            else:
-                motor.digital_write(motor.enable_pin, 0)
-                return
-            
-            # Step the motor
-            for i in range(steps):
-                motor.digital_write(motor.step_pin, True)
-                time.sleep(self.step_delay)
-                motor.digital_write(motor.step_pin, False)
-                time.sleep(self.step_delay)
-                
-        except Exception as e:
-            self.get_logger().error(f"Error stepping motor: {str(e)}")
-
-    def stop_motors(self):
-        """Emergency stop - immediately stop all motors"""
-        with self.speed_lock:
-            self.target_left_speed = 0.0
-            self.target_right_speed = 0.0
-            self.current_left_speed = 0.0
-            self.current_right_speed = 0.0
-        
-        try:
-            self.motor_left.Stop()
-            self.motor_right.Stop()
-        except Exception as e:
-            self.get_logger().error(f"Error stopping motors: {str(e)}")
 
     def destroy_node(self):
         """Cleanup when node is destroyed"""
         self.get_logger().info("Shutting down stepper motor node...")
         
-        self.motor_thread_running = False
-        self.stop_motors()
-        
-        if self.motor_thread.is_alive():
-            self.motor_thread.join(timeout=1.0)
+        # Stop motor threads
+        self.motor_left.stop()
+        self.motor_right.stop()
         
         self.get_logger().info("Motors stopped")
         super().destroy_node()

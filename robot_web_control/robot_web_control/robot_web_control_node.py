@@ -25,6 +25,7 @@ class RobotControlWebNode(Node):
         self.declare_parameter('web_port', 5000)
         self.declare_parameter('max_linear_speed', 1.0)
         self.declare_parameter('max_angular_speed', 2.0)
+        self.declare_parameter('flip_image', False)
         
         # Get parameters
         self.image_topic = self.get_parameter('image_topic').get_parameter_value().string_value
@@ -32,6 +33,7 @@ class RobotControlWebNode(Node):
         self.web_port = self.get_parameter('web_port').get_parameter_value().integer_value
         self.max_linear_speed = self.get_parameter('max_linear_speed').get_parameter_value().double_value
         self.max_angular_speed = self.get_parameter('max_angular_speed').get_parameter_value().double_value
+        self.flip_image = self.get_parameter('flip_image').get_parameter_value().bool_value
         
         # Initialize CV bridge
         self.bridge = CvBridge()
@@ -110,6 +112,10 @@ class RobotControlWebNode(Node):
         try:
             # Convert ROS Image to OpenCV format
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            
+            # Optionally flip vertically
+            if self.flip_image:
+                cv_image = cv2.flip(cv_image, 0)  # 0 = vertical flip
             
             # Store the frame with thread safety
             with self.frame_lock:

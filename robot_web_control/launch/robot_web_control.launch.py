@@ -31,6 +31,11 @@ def generate_launch_description():
             default_value='2.0',
             description='Maximum angular speed in rad/s'
         ),
+        DeclareLaunchArgument(
+            'flip_image',
+            default_value=True,
+            description='Flip the camera image'
+        ),
 
         Node(
             package='robot_web_control',
